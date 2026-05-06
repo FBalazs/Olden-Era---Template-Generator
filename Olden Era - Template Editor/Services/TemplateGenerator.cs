@@ -38,6 +38,7 @@ namespace Olden_Era___Template_Editor.Services
             // the best-candidate neutral zone now so every downstream builder can query it.
             bool useCityHold = settings.CityHold || settings.VictoryCondition == "win_condition_5";
             string? holdCityNeutralLetter = null;
+            bool treeRootIsHoldCity = false;
             if (useCityHold && settings.Topology is not (MapTopology.HubAndSpoke or MapTopology.HubAlternative))
             {
                 if (settings.Topology == MapTopology.BinaryTree)
@@ -45,6 +46,7 @@ namespace Olden_Era___Template_Editor.Services
                     var topologyNeutralLetters = neutralZones.Select(zone => zone.Letter).ToList();
                     _ = BuildBinaryTreeLetterEdges(playerLetters, topologyNeutralLetters, out string rootNeutralLetter);
                     holdCityNeutralLetter = rootNeutralLetter;
+                    treeRootIsHoldCity = true;
                 }
                 else
                 {
@@ -79,7 +81,7 @@ namespace Olden_Era___Template_Editor.Services
                 SizeX = settings.MapSize,
                 SizeZ = settings.MapSize,
                 GameRules = BuildGameRules(settings, effectiveVictoryCondition),
-                Variants = [BuildVariant(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter, useCityHold && settings.Topology is (MapTopology.HubAndSpoke or MapTopology.HubAlternative))],
+                Variants = [BuildVariant(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter, useCityHold && settings.Topology is (MapTopology.HubAndSpoke or MapTopology.HubAlternative), treeRootIsHoldCity)],
                 ZoneLayouts = BuildZoneLayouts(),
                 MandatoryContent = BuildAllMandatoryContent(playerLetters, neutralZones, settings),
                 ContentCountLimits = BuildAllContentCountLimits(),
@@ -136,7 +138,7 @@ namespace Olden_Era___Template_Editor.Services
             MapTopology.HubAndSpoke => "Hub",
             MapTopology.HubAlternative => "Hub Alternative",
             MapTopology.Chain => "Chain",
-            MapTopology.BinaryTree => "Binary Tree",
+            MapTopology.BinaryTree => "Tree",
             MapTopology.SharedWeb => "Shared Web",
             MapTopology.Random => "Random",
             _ => topology.ToString()
@@ -203,7 +205,7 @@ namespace Olden_Era___Template_Editor.Services
             {
                 // For binary tree, neutral settings represent *additional* branch subdivisions.
                 // Required internal nodes are generated first, then configured neutrals are appended.
-                int requiredInternalNodes = Math.Max(0, settings.PlayerCount - 1);
+                int requiredInternalNodes = ComputeRequiredBinaryTreeInternalNodeCount(settings.PlayerCount);
                 int defaultCastleCount = Math.Clamp(settings.NeutralZoneCastles, 0, 4);
                 var additionalPlans = plans.ToList();
                 plans.Clear();
@@ -584,47 +586,84 @@ namespace Olden_Era___Template_Editor.Services
             List<string> neutralLetters,
             out string rootNeutralLetter)
         {
-            if (playerLetters.Count < 2 || playerLetters.Count % 2 != 0)
-                throw new InvalidOperationException("Binary Tree topology requires an even number of players.");
+            if (playerLetters.Count < 2)
+                throw new InvalidOperationException("Tree topology requires at least 2 players.");
 
-            int requiredInternalNodes = playerLetters.Count - 1;
+            int requiredInternalNodes = ComputeRequiredBinaryTreeInternalNodeCount(playerLetters.Count);
             var internalLetters = neutralLetters.Take(requiredInternalNodes).ToList();
             var extraNeutralLetters = neutralLetters.Skip(requiredInternalNodes).ToList();
-            var edges = new List<(string From, string To)>(requiredInternalNodes * 2);
+            var baseEdges = new List<(string From, string To)>(requiredInternalNodes * 2);
 
             var currentLayer = new List<string>(playerLetters);
             int internalIndex = 0;
             while (currentLayer.Count > 1)
             {
-                var nextLayer = new List<string>(currentLayer.Count / 2);
-                for (int i = 0; i < currentLayer.Count; i += 2)
+                int parentCount = currentLayer.Count / 2;
+                var nextLayer = new List<string>(parentCount);
+                int tripleStart = currentLayer.Count % 2 == 1 ? currentLayer.Count - 3 : -1;
+                for (int i = 0; i < currentLayer.Count;)
                 {
-                    string left = currentLayer[i];
-                    string right = currentLayer[i + 1];
+                    int groupSize = i == tripleStart ? 3 : 2;
                     string parent = internalLetters[internalIndex++];
-                    edges.Add((parent, left));
-                    edges.Add((parent, right));
+                    for (int j = 0; j < groupSize; j++)
+                        baseEdges.Add((parent, currentLayer[i + j]));
                     nextLayer.Add(parent);
+                    i += groupSize;
                 }
 
                 currentLayer = nextLayer;
             }
 
             rootNeutralLetter = currentLayer[0];
+            if (extraNeutralLetters.Count == 0)
+                return baseEdges;
 
             // Insert additional neutral zones by subdividing existing branch edges so
             // extras live inside branches instead of becoming dangling appendages.
-            int insertionCursor = 0;
+            // Distribute subdivisions as evenly as possible across original tree edges.
+            var subdividedPaths = baseEdges
+                .Select(edge => new List<string> { edge.From, edge.To })
+                .ToList();
+            var subdivisionCounts = new int[subdividedPaths.Count];
             foreach (string extraLetter in extraNeutralLetters)
             {
-                int edgeIndex = insertionCursor % edges.Count;
-                var (from, to) = edges[edgeIndex];
-                edges[edgeIndex] = (from, extraLetter);
-                edges.Insert(edgeIndex + 1, (extraLetter, to));
-                insertionCursor += 2;
+                int edgeIndex = 0;
+                for (int i = 1; i < subdivisionCounts.Length; i++)
+                {
+                    if (subdivisionCounts[i] < subdivisionCounts[edgeIndex])
+                        edgeIndex = i;
+                }
+
+                List<string> path = subdividedPaths[edgeIndex];
+                path.Insert(path.Count - 1, extraLetter);
+                subdivisionCounts[edgeIndex]++;
+            }
+
+            var edges = new List<(string From, string To)>(baseEdges.Count + extraNeutralLetters.Count);
+            foreach (List<string> path in subdividedPaths)
+            {
+                for (int i = 0; i < path.Count - 1; i++)
+                    edges.Add((path[i], path[i + 1]));
             }
 
             return edges;
+        }
+
+        private static int ComputeRequiredBinaryTreeInternalNodeCount(int playerCount)
+        {
+            if (playerCount < 2)
+                return 0;
+
+            int total = 0;
+            int layerCount = playerCount;
+            while (layerCount > 1)
+            {
+                int nextLayerCount = layerCount / 2;
+                total += nextLayerCount;
+                layerCount = nextLayerCount;
+            }
+
+            return total;
         }
 
         private static List<string> BuildOrderedLetters(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, bool isRing)
@@ -866,7 +905,7 @@ namespace Olden_Era___Template_Editor.Services
 
         // ── Variant ──────────────────────────────────────────────────────────────
 
-        private static Variant BuildVariant(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, GenerationTuning tuning, string? holdCityNeutralLetter = null, bool hubIsHoldCity = false)
+        private static Variant BuildVariant(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, GenerationTuning tuning, string? holdCityNeutralLetter = null, bool hubIsHoldCity = false, bool treeRootIsHoldCity = false)
         {
             // Always shuffle player letters so players are not always at the same geometric positions.
             playerLetters = [.. playerLetters.OrderBy(_ => Random.Shared.Next())];
@@ -880,7 +919,7 @@ namespace Olden_Era___Template_Editor.Services
                 MapTopology.HubAndSpoke => BuildVariantHubAndSpoke(settings, playerLetters, neutralZones, tuning, hubIsHoldCity),
                 MapTopology.HubAlternative => BuildVariantHubAlternative(settings, playerLetters, neutralZones, tuning, hubIsHoldCity),
                 MapTopology.Chain       => BuildVariantChain(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
-                MapTopology.BinaryTree  => BuildVariantBinaryTree(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
+                MapTopology.BinaryTree  => BuildVariantBinaryTree(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter, treeRootIsHoldCity),
                 MapTopology.SharedWeb   => BuildVariantSharedWeb(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
                 MapTopology.Random      => BuildVariantRandom(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
                 _                       => BuildVariantDefault(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
@@ -1767,13 +1806,13 @@ namespace Olden_Era___Template_Editor.Services
 
         // ── Topology: Binary Tree ────────────────────────────────────────────────
 
-        private static Variant BuildVariantBinaryTree(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, GenerationTuning tuning, string? holdCityNeutralLetter = null)
+        private static Variant BuildVariantBinaryTree(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, GenerationTuning tuning, string? holdCityNeutralLetter = null, bool treeRootIsHoldCity = false)
         {
             var neutralByLetter = neutralZones.ToDictionary(zone => zone.Letter);
             var neutralLetters = neutralZones.Select(zone => zone.Letter).ToList();
-            var allLetters = playerLetters.Concat(neutralLetters).ToList();
             var playerSet = playerLetters.ToHashSet(StringComparer.Ordinal);
             var edges = BuildBinaryTreeLetterEdges(playerLetters, neutralLetters, out string rootNeutralLetter);
+            var allLetters = BuildRootedBinaryTreeLetterOrder(edges, rootNeutralLetter);
 
             var connsByLetter = allLetters.ToDictionary(letter => letter, _ => new List<string>(), StringComparer.Ordinal);
             var connections = new List<Connection>(edges.Count);
@@ -1812,8 +1851,12 @@ namespace Olden_Era___Template_Editor.Services
                 }
                 else
                 {
-                    bool isHoldCityRoot = holdCityNeutralLetter == letter || (holdCityNeutralLetter == null && letter == rootNeutralLetter);
-                    zones.Add(BuildNeutralZone(neutralByLetter[letter], myConns, settings.NeutralZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning, isHoldCityRoot));
+                    bool isRootLetter = letter == rootNeutralLetter;
+                    bool isHoldCityRoot = treeRootIsHoldCity
+                        ? isRootLetter
+                        : holdCityNeutralLetter == letter || (holdCityNeutralLetter == null && isRootLetter);
+                    double zoneSize = isRootLetter ? settings.HubZoneSize : settings.NeutralZoneSize;
+                    zones.Add(BuildNeutralZone(neutralByLetter[letter], myConns, zoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning, isHoldCityRoot));
                 }
             }
 
@@ -1821,6 +1864,61 @@ namespace Olden_Era___Template_Editor.Services
                 connections.AddRange(BuildRandomPortalConnections(playerLetters, allLetters, tuning, settings.MaxPortalConnections));
 
             return MakeVariant(playerLetters, rootNeutralLetter, allLetters.Count, zones, connections);
+        }
+
+        private static List<string> BuildRootedBinaryTreeLetterOrder(List<(string From, string To)> edges, string rootLetter)
+        {
+            var adjacency = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+            foreach ((string from, string to) in edges)
+            {
+                if (!adjacency.TryGetValue(from, out List<string>? fromNeighbors))
+                {
+                    fromNeighbors = [];
+                    adjacency[from] = fromNeighbors;
+                }
+
+                if (!adjacency.TryGetValue(to, out List<string>? toNeighbors))
+                {
+                    toNeighbors = [];
+                    adjacency[to] = toNeighbors;
+                }
+
+                fromNeighbors.Add(to);
+                toNeighbors.Add(from);
+            }
+
+            if (!adjacency.ContainsKey(rootLetter))
+                return adjacency.Keys.OrderBy(letter => letter, StringComparer.Ordinal).ToList();
+
+            static int OrderKey(string letter) => letter.Length > 0 && letter[0] >= 'A' && letter[0] <= 'H' ? 1 : 0;
+            var ordered = new List<string>(adjacency.Count);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var queue = new Queue<string>();
+            queue.Enqueue(rootLetter);
+            seen.Add(rootLetter);
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                ordered.Add(current);
+                List<string> neighbors = adjacency[current]
+                    .Where(neighbor => !seen.Contains(neighbor))
+                    .OrderBy(OrderKey)
+                    .ThenBy(neighbor => neighbor, StringComparer.Ordinal)
+                    .ToList();
+                foreach (string neighbor in neighbors)
+                {
+                    seen.Add(neighbor);
+                    queue.Enqueue(neighbor);
+                }
+            }
+
+            if (seen.Count != adjacency.Count)
+            {
+                foreach (string letter in adjacency.Keys.Where(letter => !seen.Contains(letter)).OrderBy(letter => letter, StringComparer.Ordinal))
+                    ordered.Add(letter);
+            }
+
+            return ordered;
         }
 
         // ── Topology: Shared Web ──────────────────────────────────────────────────

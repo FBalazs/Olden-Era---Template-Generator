@@ -48,6 +48,7 @@ namespace Olden_Era___Template_Editor.Services
         // ── Radius ───────────────────────────────────────────────────────────────
         // Cap; actual radius is computed per-layout by LayoutZones().
         private const double ZoneRadiusMax = 38;
+        private const double BinaryTreeInnerRadius = 36;
 
         // ── Human icon (person silhouette drawn with geometry) ───────────────────
         // Drawn relative to the zone centre; scaled to fit the circle.
@@ -106,7 +107,7 @@ namespace Olden_Era___Template_Editor.Services
             }
 
             var orderedZones = OrderZones(zones, variant?.Orientation?.ZeroAngleZone);
-            var positions    = LayoutZones(orderedZones);
+            var positions    = LayoutZones(orderedZones, variant?.Connections ?? [], variant?.Orientation?.ZeroAngleZone);
 
             // Draw connections first (below zones)
             DrawConnections(dc, variant?.Connections ?? [], positions);
@@ -131,7 +132,18 @@ namespace Olden_Era___Template_Editor.Services
             return ordered.Skip(zeroIndex).Concat(ordered.Take(zeroIndex)).ToList();
         }
 
-        private static Dictionary<string, Point> LayoutZones(List<Zone> zones)
+        private static Dictionary<string, Point> LayoutZones(List<Zone> zones, List<Connection> connections, string? zeroAngleZone)
+        {
+            if (TryLayoutBinaryTree(zones, connections, zeroAngleZone, out Dictionary<string, Point>? binaryTreePositions))
+                return binaryTreePositions!;
+
+            return LayoutRingZones(zones);
+        }
+
+        internal static Dictionary<string, Point> LayoutZonesForTesting(List<Zone> zones, List<Connection> connections, string? zeroAngleZone) =>
+            LayoutZones(zones, connections, zeroAngleZone);
+
+        private static Dictionary<string, Point> LayoutRingZones(List<Zone> zones)
         {
             var positions = new Dictionary<string, Point>(StringComparer.Ordinal);
             Zone? hub = zones.FirstOrDefault(z => string.Equals(z.Name, "Hub", StringComparison.Ordinal));
@@ -169,6 +181,302 @@ namespace Olden_Era___Template_Editor.Services
             // Store for use during drawing
             _zoneRadius = zoneRadius;
             return positions;
+        }
+
+        private static bool TryLayoutBinaryTree(
+            List<Zone> zones,
+            List<Connection> connections,
+            string? zeroAngleZone,
+            out Dictionary<string, Point>? positions)
+        {
+            positions = null;
+            var zoneNames = zones.Select(zone => zone.Name).ToHashSet(StringComparer.Ordinal);
+            if (zoneNames.Count == 0)
+                return false;
+
+            var adjacency = zoneNames.ToDictionary(name => name, _ => new List<string>(), StringComparer.Ordinal);
+            foreach (Connection connection in connections)
+            {
+                if (!string.Equals(connection.ConnectionType, "Direct", StringComparison.Ordinal))
+                    continue;
+                if (!zoneNames.Contains(connection.From) || !zoneNames.Contains(connection.To))
+                    continue;
+
+                adjacency[connection.From].Add(connection.To);
+                adjacency[connection.To].Add(connection.From);
+            }
+
+            var directEdges = new HashSet<(string A, string B)>();
+            foreach ((string node, List<string> neighbors) in adjacency)
+            {
+                foreach (string neighbor in neighbors)
+                {
+                    (string A, string B) normalized = string.CompareOrdinal(node, neighbor) <= 0
+                        ? (node, neighbor)
+                        : (neighbor, node);
+                    directEdges.Add(normalized);
+                }
+            }
+
+            int spawnCount = zoneNames.Count(name => name.StartsWith("Spawn-", StringComparison.Ordinal));
+            int neutralCount = zoneNames.Count(name => name.StartsWith("Neutral-", StringComparison.Ordinal));
+            bool allSpawnsAreLeaves = zoneNames
+                .Where(name => name.StartsWith("Spawn-", StringComparison.Ordinal))
+                .All(name => adjacency[name].Count == 1);
+            bool isConnectedTree = directEdges.Count == zoneNames.Count - 1 && IsConnected(zoneNames, adjacency);
+            bool hasBinaryBranching = zoneNames
+                .Where(name => name.StartsWith("Neutral-", StringComparison.Ordinal))
+                .Any(name => adjacency[name].Count >= 2);
+
+            if (spawnCount < 2 || neutralCount == 0 || !allSpawnsAreLeaves || !isConnectedTree || !hasBinaryBranching)
+                return false;
+
+            string root = SelectBinaryTreeRoot(zoneNames, adjacency, zeroAngleZone);
+            var parentByNode = new Dictionary<string, string?>(StringComparer.Ordinal);
+            var depthByNode = new Dictionary<string, int>(StringComparer.Ordinal);
+            var bfs = new Queue<string>();
+            bfs.Enqueue(root);
+            parentByNode[root] = null;
+            depthByNode[root] = 0;
+            while (bfs.Count > 0)
+            {
+                string current = bfs.Dequeue();
+                foreach (string child in OrderNodesForStableTree(adjacency[current]))
+                {
+                    if (depthByNode.ContainsKey(child))
+                        continue;
+                    parentByNode[child] = current;
+                    depthByNode[child] = depthByNode[current] + 1;
+                    bfs.Enqueue(child);
+                }
+            }
+
+            if (depthByNode.Count != zoneNames.Count)
+                return false;
+
+            var childrenByNode = zoneNames.ToDictionary(name => name, _ => new List<string>(), StringComparer.Ordinal);
+            foreach ((string node, string? parent) in parentByNode)
+            {
+                if (parent is not null)
+                    childrenByNode[parent].Add(node);
+            }
+
+            var signatureMemo = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string node in zoneNames)
+            {
+                childrenByNode[node] = childrenByNode[node]
+                    .OrderBy(child => BuildSubtreeSignature(child, childrenByNode, signatureMemo), StringComparer.Ordinal)
+                    .ToList();
+            }
+
+            var leafMemo = new Dictionary<string, int>(StringComparer.Ordinal);
+            int totalLeafWeight = CountSubtreeLeaves(root, childrenByNode, leafMemo);
+            if (totalLeafWeight <= 0)
+                return false;
+
+            int maxDepth = depthByNode.Values.DefaultIfEmpty(0).Max();
+            double availableRadius = Width / 2.0 - ZoneRadiusMax - 18;
+            double depthStep = maxDepth == 0
+                ? 0
+                : Math.Max((availableRadius - BinaryTreeInnerRadius) / maxDepth, 44);
+
+            var center = new Point(Width / 2.0, Height / 2.0);
+            var radialPositions = new Dictionary<string, Point>(StringComparer.Ordinal)
+            {
+                [root] = center
+            };
+
+            AssignSubtreePositions(root, -Math.PI / 2, 3 * Math.PI / 2, depthByNode, childrenByNode, leafMemo, center, depthStep, radialPositions);
+            _zoneRadius = ComputeBinaryTreeZoneRadius(maxDepth, depthStep, depthByNode, radialPositions);
+            positions = radialPositions;
+            return true;
+        }
+
+        private static bool IsConnected(HashSet<string> zoneNames, Dictionary<string, List<string>> adjacency)
+        {
+            string start = zoneNames.First();
+            var seen = new HashSet<string>(StringComparer.Ordinal) { start };
+            var queue = new Queue<string>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                foreach (string neighbor in adjacency[current])
+                {
+                    if (!seen.Add(neighbor))
+                        continue;
+                    queue.Enqueue(neighbor);
+                }
+            }
+
+            return seen.Count == zoneNames.Count;
+        }
+
+        private static string SelectBinaryTreeRoot(HashSet<string> zoneNames, Dictionary<string, List<string>> adjacency, string? zeroAngleZone)
+        {
+            if (!string.IsNullOrWhiteSpace(zeroAngleZone)
+                && zoneNames.Contains(zeroAngleZone)
+                && zeroAngleZone.StartsWith("Neutral-", StringComparison.Ordinal))
+            {
+                return zeroAngleZone;
+            }
+
+            var neutralCandidates = zoneNames
+                .Where(name => name.StartsWith("Neutral-", StringComparison.Ordinal))
+                .ToList();
+            if (neutralCandidates.Count == 0)
+                return zoneNames.First();
+
+            int Eccentricity(string node)
+            {
+                var distances = ComputeDistances(node, adjacency);
+                return distances.Values.DefaultIfEmpty(0).Max();
+            }
+
+            return neutralCandidates
+                .OrderBy(Eccentricity)
+                .ThenBy(node => adjacency[node].Count)
+                .ThenBy(node => node, StringComparer.Ordinal)
+                .First();
+        }
+
+        private static Dictionary<string, int> ComputeDistances(string start, Dictionary<string, List<string>> adjacency)
+        {
+            var distances = new Dictionary<string, int>(StringComparer.Ordinal) { [start] = 0 };
+            var queue = new Queue<string>();
+            queue.Enqueue(start);
+            while (queue.Count > 0)
+            {
+                string current = queue.Dequeue();
+                foreach (string neighbor in adjacency[current])
+                {
+                    if (distances.ContainsKey(neighbor))
+                        continue;
+                    distances[neighbor] = distances[current] + 1;
+                    queue.Enqueue(neighbor);
+                }
+            }
+
+            return distances;
+        }
+
+        private static List<string> OrderNodesForStableTree(IEnumerable<string> nodes) =>
+            nodes
+                .OrderBy(node => node.StartsWith("Neutral-", StringComparison.Ordinal) ? 0 : 1)
+                .ThenBy(node => node, StringComparer.Ordinal)
+                .ToList();
+
+        private static string BuildSubtreeSignature(
+            string node,
+            Dictionary<string, List<string>> childrenByNode,
+            Dictionary<string, string> signatureMemo)
+        {
+            if (signatureMemo.TryGetValue(node, out string? cached))
+                return cached;
+
+            List<string> childSignatures = childrenByNode[node]
+                .Select(child => BuildSubtreeSignature(child, childrenByNode, signatureMemo))
+                .OrderBy(signature => signature, StringComparer.Ordinal)
+                .ToList();
+
+            string signature = $"{node}[{string.Join("|", childSignatures)}]";
+            signatureMemo[node] = signature;
+            return signature;
+        }
+
+        private static int CountSubtreeLeaves(
+            string node,
+            Dictionary<string, List<string>> childrenByNode,
+            Dictionary<string, int> leafMemo)
+        {
+            if (leafMemo.TryGetValue(node, out int cached))
+                return cached;
+            if (childrenByNode[node].Count == 0)
+                return leafMemo[node] = 1;
+
+            int leaves = 0;
+            foreach (string child in childrenByNode[node])
+                leaves += CountSubtreeLeaves(child, childrenByNode, leafMemo);
+
+            leafMemo[node] = leaves;
+            return leaves;
+        }
+
+        private static void AssignSubtreePositions(
+            string node,
+            double startAngle,
+            double endAngle,
+            Dictionary<string, int> depthByNode,
+            Dictionary<string, List<string>> childrenByNode,
+            Dictionary<string, int> leafMemo,
+            Point center,
+            double depthStep,
+            Dictionary<string, Point> positions)
+        {
+            List<string> children = childrenByNode[node];
+            if (children.Count == 0)
+                return;
+
+            double span = endAngle - startAngle;
+            int totalLeaves = children.Sum(child => leafMemo[child]);
+            if (totalLeaves <= 0)
+                return;
+
+            double cursor = startAngle;
+            foreach (string child in children)
+            {
+                double fraction = (double)leafMemo[child] / totalLeaves;
+                double childStart = cursor;
+                double childEnd = cursor + span * fraction;
+                double angle = (childStart + childEnd) / 2.0;
+                int depth = depthByNode[child];
+                double radius = BinaryTreeInnerRadius + depth * depthStep;
+
+                positions[child] = new Point(
+                    center.X + Math.Cos(angle) * radius,
+                    center.Y + Math.Sin(angle) * radius);
+
+                AssignSubtreePositions(child, childStart, childEnd, depthByNode, childrenByNode, leafMemo, center, depthStep, positions);
+                cursor = childEnd;
+            }
+        }
+
+        private static double ComputeBinaryTreeZoneRadius(
+            int maxDepth,
+            double depthStep,
+            Dictionary<string, int> depthByNode,
+            Dictionary<string, Point> positions)
+        {
+            const double minGap = 8;
+            double radialBound = maxDepth == 0
+                ? ZoneRadiusMax
+                : Math.Max(14, depthStep / 2.0 - minGap / 2.0);
+            double zoneRadius = Math.Min(ZoneRadiusMax, radialBound);
+
+            foreach (IGrouping<int, string> level in depthByNode.GroupBy(pair => pair.Value, pair => pair.Key))
+            {
+                List<string> nodes = level.ToList();
+                if (nodes.Count < 2)
+                    continue;
+
+                double minDistance = double.MaxValue;
+                for (int i = 0; i < nodes.Count; i++)
+                {
+                    for (int j = i + 1; j < nodes.Count; j++)
+                    {
+                        Point a = positions[nodes[i]];
+                        Point b = positions[nodes[j]];
+                        double dx = a.X - b.X;
+                        double dy = a.Y - b.Y;
+                        minDistance = Math.Min(minDistance, Math.Sqrt(dx * dx + dy * dy));
+                    }
+                }
+
+                if (double.IsFinite(minDistance))
+                    zoneRadius = Math.Min(zoneRadius, Math.Max(14, (minDistance - minGap) / 2.0));
+            }
+
+            return Math.Clamp(zoneRadius, 14, ZoneRadiusMax);
         }
 
         // Per-layout computed zone radius (set by LayoutZones, used by DrawZone)
