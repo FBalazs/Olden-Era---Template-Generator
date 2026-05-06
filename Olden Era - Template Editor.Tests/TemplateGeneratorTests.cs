@@ -534,6 +534,163 @@ public class TemplateGeneratorTests
     }
 
     [Fact]
+    public void Generate_BinaryTreeBuildsPlayersAsLeavesWithNeutralRootedTree()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 0,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+
+        Assert.Equal(7, zones.Count);
+        Assert.Equal(6, directConnections.Count);
+        Assert.All(
+            zones.Where(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal)),
+            zone => Assert.Equal(1, degrees[zone.Name]));
+
+        Zone rootZone = Assert.Single(
+            zones.Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal)),
+            zone => degrees[zone.Name] == 2);
+        Assert.Equal(2, directConnections.Count(connection => connection.From == rootZone.Name));
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeCityHoldMarksRootNeutralCity()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 0,
+            Topology = MapTopology.BinaryTree,
+            CityHold = true
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+        Zone rootZone = Assert.Single(
+            zones.Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal)),
+            zone => degrees[zone.Name] == 2);
+        MainObject rootCity = Assert.Single(rootZone.MainObjects ?? []);
+
+        Assert.Equal("City", rootCity.Type);
+        Assert.True(rootCity.HoldCityWinCon);
+        Assert.Equal("Center", rootCity.Placement);
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeRejectsOddPlayerCount()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 3,
+            NeutralZoneCount = 2,
+            Topology = MapTopology.BinaryTree
+        };
+
+        var ex = Assert.Throws<InvalidOperationException>(() => TemplateGenerator.Generate(settings));
+        Assert.Contains("even number of players", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeDescriptionUsesBinaryTreeLabel()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 0,
+            Topology = MapTopology.BinaryTree
+        };
+
+        RmgTemplate template = TemplateGenerator.Generate(settings);
+        Assert.Matches(@"^Generated with Olden Era Template Generator v\d+\.\d+: Binary Tree layout, 3 neutral zones, 1 castle per player zone, 1 castle per neutral zone\.$", template.Description);
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeAutoCreatesRequiredInternalNeutralNodes()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 0,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+
+        Assert.Equal(7, zones.Count);
+        Assert.Equal(3, zones.Count(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal)));
+        Assert.Equal(6, directConnections.Count);
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeExtraNeutralsAreInsertedIntoBranches()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 5,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+
+        Assert.Equal(8, zones.Count(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal)));
+        Assert.All(
+            zones.Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal)),
+            zone => Assert.True(degrees[zone.Name] >= 2, $"Expected {zone.Name} to be inside a branch, got degree {degrees[zone.Name]}."));
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeNeutralCountActsAsAdditionalSubdivisions()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 1,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var neutralZones = zones
+            .Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal))
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+
+        Assert.Equal(4, neutralZones.Count); // 3 required internals + 1 configured extra
+        Assert.Equal(zones.Count - 1, directConnections.Count); // still a tree
+        Assert.Equal(2, neutralZones.Count(zone => degrees[zone.Name] == 2)); // root + one subdivider
+    }
+
+    [Fact]
     public void Generate_AdvancedModeCanCreateThirtyTwoTotalZones()
     {
         var settings = new GeneratorSettings
@@ -951,6 +1108,20 @@ public class TemplateGeneratorTests
             if (endpoint?.Type == "Connection" && endpoint.Args is { Count: > 0 })
                 names.Add(endpoint.Args[0]);
         }
+    }
+
+    private static Dictionary<string, int> ZoneDegrees(List<Connection> connections)
+    {
+        var degreeByZone = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Connection connection in connections)
+        {
+            if (!degreeByZone.TryAdd(connection.From, 1))
+                degreeByZone[connection.From]++;
+            if (!degreeByZone.TryAdd(connection.To, 1))
+                degreeByZone[connection.To]++;
+        }
+
+        return degreeByZone;
     }
 
     private static List<List<string>> RingNeutralGapsBetweenPlayers(List<string> sequence)
