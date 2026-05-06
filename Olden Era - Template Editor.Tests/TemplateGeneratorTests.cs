@@ -528,6 +528,79 @@ public class TemplateGeneratorTests
     }
 
     [Fact]
+    public void Generate_HubAlternativeBuildsPerPlayerSpokesWithEvenNeutralSplit()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 8,
+            Topology = MapTopology.HubAlternative,
+            ExperimentalBalancedZonePlacement = true,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var connections = RequiredConnections(variant);
+        var directConnections = connections
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+
+        Assert.Contains(zones, zone => zone.Name == "Hub");
+        Assert.Equal(13, zones.Count);
+
+        var neutralZones = zones
+            .Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(8, neutralZones.Count);
+        Assert.Equal(8, neutralZones.Select(zone => zone.Name).Distinct(StringComparer.Ordinal).Count());
+
+        var playerSpokeCounts = zones
+            .Where(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal))
+            .ToDictionary(
+                zone => zone.Name,
+                zone => directConnections.Count(connection =>
+                    connection.From == zone.Name
+                    && connection.To.StartsWith("Neutral-", StringComparison.Ordinal)
+                    && connection.GuardZone == zone.Name),
+                StringComparer.Ordinal);
+        Assert.All(playerSpokeCounts.Values, count => Assert.Equal(1, count));
+
+        int hubEndpointCount = directConnections.Count(connection =>
+            connection.From == "Hub"
+            && connection.ConnectionType == "Direct");
+        Assert.Equal(4, hubEndpointCount);
+
+        var neutralsByPlayer = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (Zone neutral in neutralZones)
+        {
+            string current = neutral.Name;
+            string assignedPlayer = string.Empty;
+            while (true)
+            {
+                Connection incoming = Assert.Single(directConnections, connection =>
+                    connection.To == current
+                    && connection.GuardZone == connection.From
+                    && connection.From != "Hub");
+
+                if (incoming.From.StartsWith("Spawn-", StringComparison.Ordinal))
+                {
+                    assignedPlayer = incoming.From;
+                    break;
+                }
+
+                current = incoming.From;
+            }
+
+            if (!neutralsByPlayer.TryAdd(assignedPlayer, 1))
+                neutralsByPlayer[assignedPlayer]++;
+        }
+
+        Assert.Equal(4, neutralsByPlayer.Count);
+        Assert.All(neutralsByPlayer.Values, count => Assert.Equal(2, count));
+    }
+
+    [Fact]
     public void Generate_AdvancedModeCanCreateThirtyTwoTotalZones()
     {
         var settings = new GeneratorSettings
