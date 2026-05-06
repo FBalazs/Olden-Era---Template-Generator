@@ -27,7 +27,8 @@ public class TemplateGeneratorTests
             {
                 HeroCountMin = 7,
                 HeroCountMax = 15,
-                HeroCountIncrement = 3
+                HeroCountIncrement = 3,
+                HeroHireBan = true
             },
             Topology = MapTopology.Default
         };
@@ -44,6 +45,7 @@ public class TemplateGeneratorTests
         Assert.Equal(settings.HeroSettings.HeroCountMin - settings.HeroSettings.HeroCountIncrement, template.GameRules.HeroCountMin);
         Assert.Equal(settings.HeroSettings.HeroCountMax, template.GameRules.HeroCountMax);
         Assert.Equal(settings.HeroSettings.HeroCountIncrement, template.GameRules.HeroCountIncrement);
+        Assert.Equal(settings.HeroSettings.HeroHireBan, template.GameRules.HeroHireBan);
         Assert.NotEmpty(template.ZoneLayouts ?? []);
         Assert.NotEmpty(template.ContentCountLimits ?? []);
     }
@@ -533,7 +535,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 8,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 8
+            },
             Topology = MapTopology.HubAlternative,
             ExperimentalBalancedZonePlacement = true,
             RandomPortals = false
@@ -606,7 +611,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 0,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 0
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -636,9 +644,15 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 0,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 0
+            },
+            GameEndConditions = new GameEndConditions
+            {
+                CityHold = true
+            },
             Topology = MapTopology.BinaryTree,
-            CityHold = true
         };
 
         Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
@@ -663,10 +677,17 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 0,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 0,
+                HubZoneSize = 1.8,
+                Advanced = new AdvancedSettings
+                {
+                    Enabled = true,
+                    NeutralZoneSize = 0.75
+                }
+            },
             Topology = MapTopology.BinaryTree,
-            NeutralZoneSize = 0.75,
-            HubZoneSize = 1.8
         };
 
         Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
@@ -677,8 +698,8 @@ public class TemplateGeneratorTests
             .Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal) && zone.Name != rootZone.Name)
             .ToList();
 
-        Assert.Equal(settings.HubZoneSize, rootZone.Size);
-        Assert.All(nonRootNeutrals, zone => Assert.Equal(settings.NeutralZoneSize, zone.Size));
+        Assert.Equal(settings.ZoneCfg.HubZoneSize, rootZone.Size);
+        Assert.All(nonRootNeutrals, zone => Assert.Equal(settings.ZoneCfg.Advanced.NeutralZoneSize, zone.Size));
     }
 
     [Fact]
@@ -687,7 +708,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 5,
-            NeutralZoneCount = 2,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 2
+            },
             Topology = MapTopology.BinaryTree
         };
 
@@ -710,7 +734,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 6,
-            NeutralZoneCount = 3,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 3
+            },
             Topology = MapTopology.BinaryTree
         };
 
@@ -733,7 +760,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 0,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 0
+            },
             Topology = MapTopology.BinaryTree
         };
 
@@ -747,7 +777,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 0,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 0
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -769,7 +802,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 5,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 5
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -793,7 +829,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 1,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 1
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -819,7 +858,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 6,
-            NeutralZoneCount = 12,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 12
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -852,7 +894,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 2,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 2
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -1162,7 +1207,10 @@ public class TemplateGeneratorTests
         var settings = new GeneratorSettings
         {
             PlayerCount = 4,
-            NeutralZoneCount = 2,
+            ZoneCfg = new ZoneConfiguration
+            {
+                NeutralZoneCount = 2
+            },
             Topology = MapTopology.BinaryTree,
             RandomPortals = false
         };
@@ -1206,6 +1254,25 @@ public class TemplateGeneratorTests
         Assert.Equal(130, settings.EffectiveStructureDensityPercent);
         Assert.Equal(100, settings.NeutralStackStrengthPercent);
         Assert.Equal(100, settings.BorderGuardStrengthPercent);
+    }
+
+    [Fact]
+    public void SettingsFile_RoundTripIncludesGameModeAndHeroHireBan()
+    {
+        var settings = new SettingsFile
+        {
+            GameMode = "SingleHero",
+            HeroHireBan = true
+        };
+
+        string json = JsonSerializer.Serialize(settings);
+        SettingsFile? roundTripped = JsonSerializer.Deserialize<SettingsFile>(json);
+
+        Assert.Contains("\"gameMode\":\"SingleHero\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"heroHireBan\":true", json, StringComparison.Ordinal);
+        Assert.NotNull(roundTripped);
+        Assert.Equal("SingleHero", roundTripped.GameMode);
+        Assert.True(roundTripped.HeroHireBan);
     }
 
     [Fact]

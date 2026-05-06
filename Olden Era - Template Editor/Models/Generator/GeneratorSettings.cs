@@ -30,6 +30,7 @@ namespace Olden_Era___Template_Editor.Models
         public int HeroCountMin { get; set; } = 4;
         public int HeroCountMax { get; set; } = 8;
         public int HeroCountIncrement { get; set; } = 1;
+        public bool HeroHireBan { get; set; } = false;
     }
 
     public class AdvancedSettings

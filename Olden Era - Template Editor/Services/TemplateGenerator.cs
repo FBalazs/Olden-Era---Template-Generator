@@ -205,7 +205,7 @@ namespace Olden_Era___Template_Editor.Services
                 // For binary tree, neutral settings represent *additional* branch subdivisions.
                 // Required internal nodes are generated first, then configured neutrals are appended.
                 int requiredInternalNodes = ComputeRequiredBinaryTreeInternalNodeCount(settings.PlayerCount);
-                int defaultCastleCount = Math.Clamp(settings.NeutralZoneCastles, 0, 4);
+                int defaultCastleCount = Math.Clamp(settings.ZoneCfg.NeutralZoneCastles, 0, 4);
                 var additionalPlans = plans.ToList();
                 plans.Clear();
 
@@ -424,7 +424,7 @@ namespace Olden_Era___Template_Editor.Services
             HeroCountMin = settings.HeroSettings.HeroCountMin-settings.HeroSettings.HeroCountIncrement,
             HeroCountMax = settings.HeroSettings.HeroCountMax,
             HeroCountIncrement = settings.HeroSettings.HeroCountIncrement,
-            HeroHireBan = false,
+            HeroHireBan = settings.HeroSettings.HeroHireBan,
             EncounterHoles = false,
             FactionLawsExpModifier = PercentToModifier(settings.FactionLawsExpPercent),
             AstrologyExpModifier = PercentToModifier(settings.AstrologyExpPercent),
@@ -1600,7 +1600,7 @@ namespace Olden_Era___Template_Editor.Services
                     hubConns.Add($"Hub-{endpointLetter}-{e}");
             }
 
-            zones.Add(BuildHubZone([.. hubConns], tuning, hubIsHoldCity, settings.HubZoneSize));
+            zones.Add(BuildHubZone([.. hubConns], tuning, hubIsHoldCity, settings.ZoneCfg.HubZoneSize));
 
             foreach (var spoke in spokeLetters)
             {
@@ -1622,11 +1622,11 @@ namespace Olden_Era___Template_Editor.Services
                     int playerIdx = playerLetters.IndexOf(letter);
                     if (playerIdx >= 0)
                     {
-                        zones.Add(BuildSpawnZone(letter, $"Player{playerIdx + 1}", [.. myConns], settings.PlayerZoneCastles, settings.MatchPlayerCastleFactions, settings.PlayerZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
+                        zones.Add(BuildSpawnZone(letter, $"Player{playerIdx + 1}", [.. myConns], settings.ZoneCfg.PlayerZoneCastles, settings.MatchPlayerCastleFactions, settings.ZoneCfg.Advanced.PlayerZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
                     }
                     else
                     {
-                        zones.Add(BuildNeutralZone(neutralByLetter[letter], [.. myConns], settings.NeutralZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
+                        zones.Add(BuildNeutralZone(neutralByLetter[letter], [.. myConns], settings.ZoneCfg.Advanced.NeutralZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
                     }
                 }
             }
@@ -1825,7 +1825,7 @@ namespace Olden_Era___Template_Editor.Services
                 int playerIdx = playerLetters.IndexOf(letter);
                 if (playerIdx >= 0)
                 {
-                    zones.Add(BuildSpawnZone(letter, $"Player{playerIdx + 1}", myConns, settings.PlayerZoneCastles, settings.MatchPlayerCastleFactions, settings.PlayerZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
+                    zones.Add(BuildSpawnZone(letter, $"Player{playerIdx + 1}", myConns, settings.ZoneCfg.PlayerZoneCastles, settings.MatchPlayerCastleFactions, settings.ZoneCfg.Advanced.PlayerZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
                 }
                 else
                 {
@@ -1833,7 +1833,7 @@ namespace Olden_Era___Template_Editor.Services
                     bool isHoldCityRoot = treeRootIsHoldCity
                         ? isRootLetter
                         : holdCityNeutralLetter == letter || (holdCityNeutralLetter == null && isRootLetter);
-                    double zoneSize = isRootLetter ? settings.HubZoneSize : settings.NeutralZoneSize;
+                    double zoneSize = isRootLetter ? settings.ZoneCfg.HubZoneSize : settings.ZoneCfg.Advanced.NeutralZoneSize;
                     zones.Add(BuildNeutralZone(neutralByLetter[letter], myConns, zoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning, isHoldCityRoot));
                 }
             }

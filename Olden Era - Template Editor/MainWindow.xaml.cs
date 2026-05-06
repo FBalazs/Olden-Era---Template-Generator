@@ -437,6 +437,12 @@ namespace Olden_Era___Template_Editor
             Validate();
         }
 
+        private void CmbGameMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!IsInitialized) return;
+            MarkDirty();
+        }
+
         private void ChkOption_Changed(object sender, RoutedEventArgs e)
         {
             if (!IsInitialized) return;
@@ -665,6 +671,7 @@ namespace Olden_Era___Template_Editor
         private SettingsFile GatherSettings() => new()
         {
             TemplateName          = TxtTemplateName.Text.Trim(),
+            GameMode              = CmbGameMode.SelectedItem as string ?? "Classic",
             MapSize               = SelectedMapSize(),
             PlayerCount           = (int)SldPlayers.Value,
             NeutralZoneCount      = (int)SldNeutral.Value,
@@ -689,6 +696,7 @@ namespace Olden_Era___Template_Editor
             HeroCountMin          = (int)SldHeroMin.Value,
             HeroCountMax          = (int)SldHeroMax.Value,
             HeroCountIncrement    = (int)SldHeroIncrement.Value,
+            HeroHireBan           = ChkHeroHireBan.IsChecked == true,
             Topology              = TopologyOptions[CmbTopology.SelectedIndex].Topology,
             RandomPortals         = ChkRandomPortals.IsChecked == true,
             MaxPortalConnections  = (int)SldMaxPortals.Value,
@@ -722,6 +730,11 @@ namespace Olden_Era___Template_Editor
         private void ApplySettings(SettingsFile s)
         {
             TxtTemplateName.Text    = s.TemplateName;
+            string selectedGameMode = !string.IsNullOrWhiteSpace(s.GameMode)
+                && KnownValues.GameModes.Contains(s.GameMode, StringComparer.Ordinal)
+                ? s.GameMode
+                : "Classic";
+            CmbGameMode.SelectedItem = selectedGameMode;
             bool hasCustomZoneSizes = Math.Abs(s.PlayerZoneSize - 1.0) > 0.0001 || Math.Abs(s.NeutralZoneSize - 1.0) > 0.0001;
             bool needsExperimentalMapSizes = s.ExperimentalMapSizes || KnownValues.IsExperimentalMapSize(s.MapSize);
             _advancedZoneSettings = s.AdvancedMode || needsExperimentalMapSizes || hasCustomZoneSizes;
@@ -748,6 +761,7 @@ namespace Olden_Era___Template_Editor
             SldHeroMin.Value        = s.HeroCountMin;
             SldHeroMax.Value        = s.HeroCountMax;
             SldHeroIncrement.Value  = s.HeroCountIncrement;
+            ChkHeroHireBan.IsChecked = s.HeroHireBan;
             int topoIdx = Array.FindIndex(TopologyOptions, t => t.Topology == s.Topology);
             if (topoIdx >= 0) CmbTopology.SelectedIndex = topoIdx;
             ChkRandomPortals.IsChecked        = s.RandomPortals;
@@ -964,8 +978,10 @@ namespace Olden_Era___Template_Editor
             {
                 HeroCountMin = (int)SldHeroMin.Value,
                 HeroCountMax = (int)SldHeroMax.Value,
-                HeroCountIncrement = (int)SldHeroIncrement.Value
+                HeroCountIncrement = (int)SldHeroIncrement.Value,
+                HeroHireBan = ChkHeroHireBan.IsChecked == true,
             },
+            
             MapSize = SelectedMapSize(),
             GameEndConditions = new GameEndConditions
             {
