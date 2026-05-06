@@ -39,7 +39,8 @@ namespace Olden_Era___Template_Editor
             (MapTopology.Default,     "Ring",          "All zones are arranged in a circle. Each zone connects to the two zones next to it."),
             (MapTopology.HubAndSpoke, "Hub",   "All zones connect to a shared central hub. Players never border each other directly."),
             (MapTopology.HubAlternative, "Hub Alternative", "Shared central hub with neutrals placed only on player-to-hub spokes, split evenly across players."),
-            (MapTopology.Chain,       "Chain",         "Zones are connected in a straight line from one end to the other, with no wrap-around.")
+            (MapTopology.Chain,       "Chain",         "Zones are connected in a straight line from one end to the other, with no wrap-around."),
+            (MapTopology.BinaryTree,  "Binary Tree",   "Players are leaf zones connected through neutral internal nodes in a binary tree (requires an even player count).")
             ];
 
         public MainWindow()
@@ -325,12 +326,19 @@ namespace Olden_Era___Template_Editor
             bool cityHoldActive = ChkCityHold.IsChecked == true;
             if (cityHoldActive)
             {
-                if (selectedTopology is not (MapTopology.HubAndSpoke or MapTopology.HubAlternative) && neutral == 0)
+                if (selectedTopology is not (MapTopology.HubAndSpoke or MapTopology.HubAlternative or MapTopology.BinaryTree) && neutral == 0)
                 {
                     SetValidationText("City Hold requires at least one neutral zone to place the hold city. Add a neutral zone or switch to the Hub layout.");
                     BtnPreview.IsEnabled = false;
                     return false;
                 }
+            }
+
+            if (selectedTopology == MapTopology.BinaryTree && players % 2 != 0)
+            {
+                SetValidationText("Binary Tree topology requires an even number of players.");
+                BtnPreview.IsEnabled = false;
+                return false;
             }
 
             string selectedVictoryCondition = CmbVictory.SelectedIndex >= 0 && CmbVictory.SelectedIndex < KnownValues.VictoryConditionIds.Length
