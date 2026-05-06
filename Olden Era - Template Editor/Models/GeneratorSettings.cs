@@ -4,6 +4,7 @@ namespace Olden_Era___Template_Editor.Models
     {
         public string TemplateName { get; set; } = "Custom Template";
         public string GameMode { get; set; } = "Classic";
+        public bool HeroHireBan { get; set; } = false;
         public int PlayerCount { get; set; } = 2;
         public int HeroCountMin { get; set; } = 4;
         public int HeroCountMax { get; set; } = 8;

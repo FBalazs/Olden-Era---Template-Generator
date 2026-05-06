@@ -425,7 +425,7 @@ namespace Olden_Era___Template_Editor.Services
             HeroCountMin = settings.HeroCountMin-settings.HeroCountIncrement,
             HeroCountMax = settings.HeroCountMax,
             HeroCountIncrement = settings.HeroCountIncrement,
-            HeroHireBan = false,
+            HeroHireBan = settings.HeroHireBan,
             EncounterHoles = false,
             FactionLawsExpModifier = PercentToModifier(settings.FactionLawsExpPercent),
             AstrologyExpModifier = PercentToModifier(settings.AstrologyExpPercent),

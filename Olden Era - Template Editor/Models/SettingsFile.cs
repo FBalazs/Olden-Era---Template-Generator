@@ -9,6 +9,7 @@ namespace Olden_Era___Template_Editor.Models
     public sealed class SettingsFile
     {
         [JsonPropertyName("templateName")]      public string  TemplateName           { get; set; } = "Custom Template";
+        [JsonPropertyName("gameMode")]          public string  GameMode               { get; set; } = "Classic";
         [JsonPropertyName("mapSize")]           public int     MapSize                { get; set; } = 160;
         [JsonPropertyName("playerCount")]       public int     PlayerCount            { get; set; } = 2;
         [JsonPropertyName("neutralZoneCount")]  public int     NeutralZoneCount       { get; set; } = 0;
@@ -32,6 +33,7 @@ namespace Olden_Era___Template_Editor.Models
         [JsonPropertyName("heroMin")]           public int     HeroCountMin           { get; set; } = 4;
         [JsonPropertyName("heroMax")]           public int     HeroCountMax           { get; set; } = 8;
         [JsonPropertyName("heroIncrement")]     public int     HeroCountIncrement     { get; set; } = 1;
+        [JsonPropertyName("heroHireBan")]       public bool    HeroHireBan            { get; set; } = false;
         [JsonPropertyName("topology")]          public MapTopology Topology           { get; set; } = MapTopology.Random;
         [JsonPropertyName("randomPortals")]     public bool    RandomPortals          { get; set; } = false;
         [JsonPropertyName("maxPortalConns")]    public int     MaxPortalConnections   { get; set; } = 32;

@@ -21,6 +21,7 @@ public class TemplateGeneratorTests
             MapSize = 200,
             AdvancedMode = true,
             VictoryCondition = "win_condition_5",
+            HeroHireBan = true,
             HeroCountMin = 7,
             HeroCountMax = 15,
             HeroCountIncrement = 3,
@@ -39,6 +40,7 @@ public class TemplateGeneratorTests
         Assert.Equal(settings.HeroCountMin - settings.HeroCountIncrement, template.GameRules.HeroCountMin);
         Assert.Equal(settings.HeroCountMax, template.GameRules.HeroCountMax);
         Assert.Equal(settings.HeroCountIncrement, template.GameRules.HeroCountIncrement);
+        Assert.Equal(settings.HeroHireBan, template.GameRules.HeroHireBan);
         Assert.NotEmpty(template.ZoneLayouts ?? []);
         Assert.NotEmpty(template.ContentCountLimits ?? []);
     }
@@ -1102,6 +1104,25 @@ public class TemplateGeneratorTests
         Assert.Equal(130, settings.EffectiveStructureDensityPercent);
         Assert.Equal(100, settings.NeutralStackStrengthPercent);
         Assert.Equal(100, settings.BorderGuardStrengthPercent);
+    }
+
+    [Fact]
+    public void SettingsFile_RoundTripIncludesGameModeAndHeroHireBan()
+    {
+        var settings = new SettingsFile
+        {
+            GameMode = "SingleHero",
+            HeroHireBan = true
+        };
+
+        string json = JsonSerializer.Serialize(settings);
+        SettingsFile? roundTripped = JsonSerializer.Deserialize<SettingsFile>(json);
+
+        Assert.Contains("\"gameMode\":\"SingleHero\"", json, StringComparison.Ordinal);
+        Assert.Contains("\"heroHireBan\":true", json, StringComparison.Ordinal);
+        Assert.NotNull(roundTripped);
+        Assert.Equal("SingleHero", roundTripped.GameMode);
+        Assert.True(roundTripped.HeroHireBan);
     }
 
     [Fact]
