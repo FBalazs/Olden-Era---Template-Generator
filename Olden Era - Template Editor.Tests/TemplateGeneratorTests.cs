@@ -658,17 +658,73 @@ public class TemplateGeneratorTests
     }
 
     [Fact]
-    public void Generate_BinaryTreeRejectsOddPlayerCount()
+    public void Generate_BinaryTreeUsesHubZoneSizeForRootNeutral()
     {
         var settings = new GeneratorSettings
         {
-            PlayerCount = 3,
+            PlayerCount = 4,
+            NeutralZoneCount = 0,
+            Topology = MapTopology.BinaryTree,
+            NeutralZoneSize = 0.75,
+            HubZoneSize = 1.8
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        string rootZoneName = Assert.IsType<string>(variant.Orientation?.ZeroAngleZone);
+        Zone rootZone = Assert.Single(zones, zone => zone.Name == rootZoneName);
+        var nonRootNeutrals = zones
+            .Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal) && zone.Name != rootZone.Name)
+            .ToList();
+
+        Assert.Equal(settings.HubZoneSize, rootZone.Size);
+        Assert.All(nonRootNeutrals, zone => Assert.Equal(settings.NeutralZoneSize, zone.Size));
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeSupportsFivePlayersWithoutThrowing()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 5,
             NeutralZoneCount = 2,
             Topology = MapTopology.BinaryTree
         };
 
-        var ex = Assert.Throws<InvalidOperationException>(() => TemplateGenerator.Generate(settings));
-        Assert.Contains("even number of players", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+
+        Assert.Equal(zones.Count - 1, directConnections.Count);
+        Assert.Equal(5, zones.Count(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal)));
+        Assert.All(zones.Where(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal)),
+            zone => Assert.Equal(1, degrees[zone.Name]));
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeSupportsSixPlayersWithoutThrowing()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 6,
+            NeutralZoneCount = 3,
+            Topology = MapTopology.BinaryTree
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+
+        Assert.Equal(zones.Count - 1, directConnections.Count);
+        Assert.Equal(6, zones.Count(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal)));
+        Assert.All(zones.Where(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal)),
+            zone => Assert.Equal(1, degrees[zone.Name]));
     }
 
     [Fact]
@@ -682,7 +738,7 @@ public class TemplateGeneratorTests
         };
 
         RmgTemplate template = TemplateGenerator.Generate(settings);
-        Assert.Matches(@"^Generated with Olden Era Template Generator v\d+\.\d+: Binary Tree layout, 3 neutral zones, 1 castle per player zone, 1 castle per neutral zone\.$", template.Description);
+        Assert.Matches(@"^Generated with Olden Era Template Generator v\d+\.\d+: Tree layout, 3 neutral zones, 1 castle per player zone, 1 castle per neutral zone\.$", template.Description);
     }
 
     [Fact]
@@ -755,6 +811,58 @@ public class TemplateGeneratorTests
         Assert.Equal(4, neutralZones.Count); // 3 required internals + 1 configured extra
         Assert.Equal(zones.Count - 1, directConnections.Count); // still a tree
         Assert.Equal(2, neutralZones.Count(zone => degrees[zone.Name] == 2)); // root + one subdivider
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeExtraNeutralSubdivisionsAreBalancedAcrossLeafDepths()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 6,
+            NeutralZoneCount = 12,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var directConnections = RequiredConnections(variant)
+            .Where(connection => connection.ConnectionType == "Direct")
+            .ToList();
+        var degrees = ZoneDegrees(directConnections);
+        Zone rootZone = zones
+            .Where(zone => zone.Name.StartsWith("Neutral-", StringComparison.Ordinal))
+            .OrderByDescending(zone => degrees.GetValueOrDefault(zone.Name))
+            .First();
+
+        var depthByZone = ComputeDepthByZone(rootZone.Name, directConnections);
+        var spawnDepths = zones
+            .Where(zone => zone.Name.StartsWith("Spawn-", StringComparison.Ordinal))
+            .Select(zone => depthByZone[zone.Name])
+            .ToList();
+
+        Assert.NotEmpty(spawnDepths);
+        Assert.True(spawnDepths.Max() - spawnDepths.Min() <= 2,
+            $"Expected evenly distributed subdivisions, got spawn depths: {string.Join(", ", spawnDepths)}");
+    }
+
+    [Fact]
+    public void Generate_BinaryTreeOrdersZonesFromNeutralRootOutward()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 2,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        string zeroAngleZone = Assert.IsType<string>(variant.Orientation?.ZeroAngleZone);
+
+        Assert.StartsWith("Neutral-", zeroAngleZone, StringComparison.Ordinal);
+        Assert.Equal(zeroAngleZone, zones[0].Name);
     }
 
     [Fact]
@@ -1049,6 +1157,40 @@ public class TemplateGeneratorTests
     }
 
     [Fact]
+    public void TemplatePreviewPngWriter_BinaryTreeLayoutPlacesRootAtCenterAndChildrenOutward()
+    {
+        var settings = new GeneratorSettings
+        {
+            PlayerCount = 4,
+            NeutralZoneCount = 2,
+            Topology = MapTopology.BinaryTree,
+            RandomPortals = false
+        };
+        Variant variant = SingleVariant(TemplateGenerator.Generate(settings));
+        var zones = RequiredZones(variant);
+        var connections = RequiredConnections(variant);
+        string zeroAngleZone = Assert.IsType<string>(variant.Orientation?.ZeroAngleZone);
+
+        Dictionary<string, Point> positions = TemplatePreviewPngWriter.LayoutZonesForTesting(zones, connections, zeroAngleZone);
+        Point center = new(350, 350);
+        Point root = positions[zeroAngleZone];
+        var directConnections = connections.Where(connection => connection.ConnectionType == "Direct").ToList();
+        var depthByZone = ComputeDepthByZone(zeroAngleZone, directConnections);
+
+        Assert.InRange(Distance(root, center), 0, 1.5);
+        Assert.Equal(zones.Count, positions.Count);
+        Assert.All(depthByZone.Where(pair => pair.Key != zeroAngleZone), pair =>
+        {
+            double rootDistance = Distance(positions[pair.Key], center);
+            Assert.True(rootDistance > 20, $"Expected {pair.Key} to be outside root radius.");
+        });
+
+        double maxDepth1 = depthByZone.Where(pair => pair.Value == 1).Select(pair => Distance(positions[pair.Key], center)).DefaultIfEmpty(0).Max();
+        double minDepth2 = depthByZone.Where(pair => pair.Value >= 2).Select(pair => Distance(positions[pair.Key], center)).DefaultIfEmpty(maxDepth1 + 1).Min();
+        Assert.True(minDepth2 > maxDepth1, "Expected deeper binary-tree levels to render further from center.");
+    }
+
+    [Fact]
     public void SettingsFile_LegacyContentDensitySeedsSplitDensitySettings()
     {
         const string json = """
@@ -1232,6 +1374,56 @@ public class TemplateGeneratorTests
         }
 
         return degreeByZone;
+    }
+
+    private static Dictionary<string, int> ComputeDepthByZone(string rootZone, List<Connection> connections)
+    {
+        var adjacency = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (Connection connection in connections)
+        {
+            if (!adjacency.TryGetValue(connection.From, out List<string>? fromNeighbors))
+            {
+                fromNeighbors = [];
+                adjacency[connection.From] = fromNeighbors;
+            }
+
+            if (!adjacency.TryGetValue(connection.To, out List<string>? toNeighbors))
+            {
+                toNeighbors = [];
+                adjacency[connection.To] = toNeighbors;
+            }
+
+            fromNeighbors.Add(connection.To);
+            toNeighbors.Add(connection.From);
+        }
+
+        var depthByZone = new Dictionary<string, int>(StringComparer.Ordinal) { [rootZone] = 0 };
+        var queue = new Queue<string>();
+        queue.Enqueue(rootZone);
+        while (queue.Count > 0)
+        {
+            string current = queue.Dequeue();
+            if (!adjacency.TryGetValue(current, out List<string>? neighbors))
+                continue;
+
+            foreach (string neighbor in neighbors)
+            {
+                if (depthByZone.ContainsKey(neighbor))
+                    continue;
+
+                depthByZone[neighbor] = depthByZone[current] + 1;
+                queue.Enqueue(neighbor);
+            }
+        }
+
+        return depthByZone;
+    }
+
+    private static double Distance(Point a, Point b)
+    {
+        double dx = a.X - b.X;
+        double dy = a.Y - b.Y;
+        return Math.Sqrt(dx * dx + dy * dy);
     }
 
     private static List<List<string>> RingNeutralGapsBetweenPlayers(List<string> sequence)

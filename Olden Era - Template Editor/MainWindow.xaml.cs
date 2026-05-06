@@ -40,7 +40,7 @@ namespace Olden_Era___Template_Editor
             (MapTopology.HubAndSpoke, "Hub",   "All zones connect to a shared central hub. Players never border each other directly."),
             (MapTopology.HubAlternative, "Hub Alternative", "Shared central hub with neutrals placed only on player-to-hub spokes, split evenly across players."),
             (MapTopology.Chain,       "Chain",         "Zones are connected in a straight line from one end to the other, with no wrap-around."),
-            (MapTopology.BinaryTree,  "Binary Tree",   "Players are leaf zones connected through neutral internal nodes in a binary tree (requires an even player count).")
+            (MapTopology.BinaryTree,  "Tree",   "Players are leaf zones connected through neutral internal nodes in a rooted tree.")
             ];
 
         public MainWindow()
@@ -334,13 +334,6 @@ namespace Olden_Era___Template_Editor
                 }
             }
 
-            if (selectedTopology == MapTopology.BinaryTree && players % 2 != 0)
-            {
-                SetValidationText("Binary Tree topology requires an even number of players.");
-                BtnPreview.IsEnabled = false;
-                return false;
-            }
-
             string selectedVictoryCondition = CmbVictory.SelectedIndex >= 0 && CmbVictory.SelectedIndex < KnownValues.VictoryConditionIds.Length
                 ? KnownValues.VictoryConditionIds[CmbVictory.SelectedIndex]
                 : "win_condition_1";
@@ -429,8 +422,8 @@ namespace Olden_Era___Template_Editor
             if (!isolateApplicable) ChkNoDirectPlayerConn.IsChecked = false;
             UpdateIsolateDescVisibility();
             UpdateAdvancedZoneSettingsVisibility();
-            PnlHubZoneSize.Visibility = topo is MapTopology.HubAndSpoke or MapTopology.HubAlternative ? Visibility.Visible : Visibility.Collapsed;
-            PnlHubCastles.Visibility  = topo is MapTopology.HubAndSpoke or MapTopology.HubAlternative ? Visibility.Visible : Visibility.Collapsed;
+            PnlHubZoneSize.Visibility = topo is MapTopology.HubAndSpoke or MapTopology.HubAlternative or MapTopology.BinaryTree ? Visibility.Visible : Visibility.Collapsed;
+            PnlHubCastles.Visibility  = topo is MapTopology.HubAndSpoke or MapTopology.HubAlternative or MapTopology.BinaryTree ? Visibility.Visible : Visibility.Collapsed;
 
             MarkDirty();
             Validate();

@@ -475,7 +475,7 @@
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
                             <DockPanel Grid.Column="0">
-                                <Label Content="Hub zone size" DockPanel.Dock="Left"/>
+                                <Label Content="Hub/root zone size" DockPanel.Dock="Left"/>
                                 <TextBlock x:Name="TxtHubZoneSize" Text="1.00x" DockPanel.Dock="Right"
                                            HorizontalAlignment="Right" VerticalAlignment="Center"
                                            Margin="0,0,4,0" Style="{StaticResource ValueText}"/>

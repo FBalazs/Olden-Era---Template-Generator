@@ -11,7 +11,7 @@ namespace Olden_Era___Template_Editor.Models
         /// <summary>Zones are connected in a straight line with no wrap-around.</summary>
         Chain,
 
-        /// <summary>Players are leaf zones in a binary tree; internal nodes are neutral connector zones.</summary>
+        /// <summary>Players are leaf zones in a rooted tree; internal nodes are neutral connector zones.</summary>
         BinaryTree,
 
         /// <summary>Players connect to shared neutral zones, which form a ring between them.</summary>
