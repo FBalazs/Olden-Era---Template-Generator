@@ -15,6 +15,9 @@ namespace Olden_Era___Template_Editor.Models
         SharedWeb,
 
         /// <summary>Zones are placed at random positions; each zone connects to all zones that border it based on proximity.</summary>
-        Random
+        Random,
+
+        /// <summary>Hub-based layout where neutral zones are split evenly and placed only on player-to-hub spokes.</summary>
+        HubAlternative
     }
 }

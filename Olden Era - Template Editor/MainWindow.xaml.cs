@@ -38,6 +38,7 @@ namespace Olden_Era___Template_Editor
             (MapTopology.Random,      "Random",        "Zones are placed at random positions. Each zone connects to all zones that border it — no fixed structure."),
             (MapTopology.Default,     "Ring",          "All zones are arranged in a circle. Each zone connects to the two zones next to it."),
             (MapTopology.HubAndSpoke, "Hub",   "All zones connect to a shared central hub. Players never border each other directly."),
+            (MapTopology.HubAlternative, "Hub Alternative", "Shared central hub with neutrals placed only on player-to-hub spokes, split evenly across players."),
             (MapTopology.Chain,       "Chain",         "Zones are connected in a straight line from one end to the other, with no wrap-around.")
             ];
 
@@ -302,7 +303,7 @@ namespace Olden_Era___Template_Editor
             if (cityHoldActive)
             {
                 var topology = CmbTopology.SelectedIndex >= 0 ? TopologyOptions[CmbTopology.SelectedIndex].Topology : MapTopology.Default;
-                if (topology != MapTopology.HubAndSpoke && neutral == 0)
+                if (topology is not (MapTopology.HubAndSpoke or MapTopology.HubAlternative) && neutral == 0)
                 {
                     SetValidationText("City Hold requires at least one neutral zone to place the hold city. Add a neutral zone or switch to the Hub layout.");
                     BtnPreview.IsEnabled = false;
@@ -398,7 +399,7 @@ namespace Olden_Era___Template_Editor
             if (!isolateApplicable) ChkNoDirectPlayerConn.IsChecked = false;
             UpdateIsolateDescVisibility();
             UpdateAdvancedZoneSettingsVisibility();
-            PnlHubZoneSize.Visibility = topo == MapTopology.HubAndSpoke ? Visibility.Visible : Visibility.Collapsed;
+            PnlHubZoneSize.Visibility = topo is MapTopology.HubAndSpoke or MapTopology.HubAlternative ? Visibility.Visible : Visibility.Collapsed;
 
             MarkDirty();
             Validate();

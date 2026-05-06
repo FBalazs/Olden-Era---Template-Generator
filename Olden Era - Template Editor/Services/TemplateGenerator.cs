@@ -38,7 +38,7 @@ namespace Olden_Era___Template_Editor.Services
             // the best-candidate neutral zone now so every downstream builder can query it.
             bool useCityHold = settings.CityHold || settings.VictoryCondition == "win_condition_5";
             string? holdCityNeutralLetter = null;
-            if (useCityHold && settings.Topology != MapTopology.HubAndSpoke)
+            if (useCityHold && settings.Topology is not (MapTopology.HubAndSpoke or MapTopology.HubAlternative))
             {
                 var adjacency = BuildTopologyAdjacency(settings, playerLetters, neutralZones);
                 holdCityNeutralLetter = PickHoldCityNeutralLetter(neutralZones, playerLetters, adjacency);
@@ -70,7 +70,7 @@ namespace Olden_Era___Template_Editor.Services
                 SizeX = settings.MapSize,
                 SizeZ = settings.MapSize,
                 GameRules = BuildGameRules(settings, effectiveVictoryCondition),
-                Variants = [BuildVariant(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter, useCityHold && settings.Topology == MapTopology.HubAndSpoke)],
+                Variants = [BuildVariant(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter, useCityHold && settings.Topology is (MapTopology.HubAndSpoke or MapTopology.HubAlternative))],
                 ZoneLayouts = BuildZoneLayouts(),
                 MandatoryContent = BuildAllMandatoryContent(playerLetters, neutralZones, settings),
                 ContentCountLimits = BuildAllContentCountLimits(),
@@ -125,6 +125,7 @@ namespace Olden_Era___Template_Editor.Services
         {
             MapTopology.Default => "Ring",
             MapTopology.HubAndSpoke => "Hub",
+            MapTopology.HubAlternative => "Hub Alternative",
             MapTopology.Chain => "Chain",
             MapTopology.SharedWeb => "Shared Web",
             MapTopology.Random => "Random",
@@ -331,6 +332,33 @@ namespace Olden_Era___Template_Editor.Services
                         Link(ordered[i], ordered[(i + 1) % rn]);
                     break;
                 }
+                case MapTopology.HubAlternative:
+                {
+                    var capacities = BuildEvenGapCapacities(
+                        playerLetters.Count,
+                        neutralZones.Count,
+                        minimumPerGap: 0);
+                    var spokes = AssignNeutralZonesToGaps(neutralZones, capacities, preferInteriorGaps: false);
+                    var hubEndpoints = new List<string>(playerLetters.Count);
+
+                    for (int i = 0; i < playerLetters.Count; i++)
+                    {
+                        var spokeLetters = new List<string> { playerLetters[i] };
+                        spokeLetters.AddRange(OrderNeutralsWithinGap(spokes[i]).Select(zone => zone.Letter));
+                        for (int j = 0; j < spokeLetters.Count - 1; j++)
+                            Link(spokeLetters[j], spokeLetters[j + 1]);
+
+                        hubEndpoints.Add(spokeLetters[^1]);
+                    }
+
+                    for (int i = 0; i < hubEndpoints.Count; i++)
+                    {
+                        for (int j = i + 1; j < hubEndpoints.Count; j++)
+                            Link(hubEndpoints[i], hubEndpoints[j]);
+                    }
+
+                    break;
+                }
 
                 default:
                 {
@@ -501,7 +529,7 @@ namespace Olden_Era___Template_Editor.Services
             {
                 MapTopology.Default => neutralZoneCount >= settings.PlayerCount * min,
                 MapTopology.Chain => neutralZoneCount >= (settings.PlayerCount - 1) * min,
-                MapTopology.HubAndSpoke => min <= 1,
+                MapTopology.HubAndSpoke or MapTopology.HubAlternative => min <= 1,
                 MapTopology.SharedWeb => min <= 1 && neutralZoneCount >= 1,
                 _ => false,
             };
@@ -758,6 +786,7 @@ namespace Olden_Era___Template_Editor.Services
             return settings.Topology switch
             {
                 MapTopology.HubAndSpoke => BuildVariantHubAndSpoke(settings, playerLetters, neutralZones, tuning, hubIsHoldCity),
+                MapTopology.HubAlternative => BuildVariantHubAlternative(settings, playerLetters, neutralZones, tuning, hubIsHoldCity),
                 MapTopology.Chain       => BuildVariantChain(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
                 MapTopology.SharedWeb   => BuildVariantSharedWeb(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
                 MapTopology.Random      => BuildVariantRandom(settings, playerLetters, neutralZones, tuning, holdCityNeutralLetter),
@@ -815,7 +844,7 @@ namespace Olden_Era___Template_Editor.Services
             var connections = new List<Connection>();
 
             bool useRandom = settings.Topology == MapTopology.Random;
-            bool useHub    = settings.Topology == MapTopology.HubAndSpoke;
+            bool useHub    = settings.Topology is MapTopology.HubAndSpoke or MapTopology.HubAlternative;
 
             if (useHub)
             {
@@ -1426,6 +1455,156 @@ namespace Olden_Era___Template_Editor.Services
                 connections.AddRange(BuildRandomPortalConnections(playerLetters, outerLetters, tuning, settings.MaxPortalConnections));
 
             return MakeVariant(playerLetters, outerLetters[0], outerLetters.Count + 1, zones, connections);
+        }
+
+        private static Variant BuildVariantHubAlternative(GeneratorSettings settings, List<string> playerLetters, List<NeutralZonePlan> neutralZones, GenerationTuning tuning, bool hubIsHoldCity = false)
+        {
+            var neutralByLetter = neutralZones.ToDictionary(zone => zone.Letter);
+            int[] capacities = BuildEvenGapCapacities(
+                playerLetters.Count,
+                neutralZones.Count,
+                minimumPerGap: 0);
+            var spokes = AssignNeutralZonesToGaps(neutralZones, capacities, preferInteriorGaps: false);
+
+            var spokeLetters = new List<List<string>>(playerLetters.Count);
+            var hubEndpointLetters = new List<string>(playerLetters.Count);
+            for (int i = 0; i < playerLetters.Count; i++)
+            {
+                var spoke = new List<string> { playerLetters[i] };
+                spoke.AddRange(OrderNeutralsWithinGap(spokes[i]).Select(zone => zone.Letter));
+                spokeLetters.Add(spoke);
+                hubEndpointLetters.Add(spoke[^1]);
+            }
+
+            var ringLetters = new List<string>(playerLetters.Count + neutralZones.Count);
+            foreach (var spoke in spokeLetters)
+                ringLetters.AddRange(spoke);
+
+            var zones = new List<Zone>();
+            var connections = new List<Connection>();
+
+            var hubConns = hubEndpointLetters.Select(letter => $"Hub-{letter}").ToList();
+            foreach (var endpointLetter in hubEndpointLetters)
+            {
+                for (int e = 1; e < ConnectionsPerZone; e++)
+                    hubConns.Add($"Hub-{endpointLetter}-{e}");
+            }
+
+            zones.Add(BuildHubZone([.. hubConns], tuning, hubIsHoldCity, settings.HubZoneSize));
+
+            foreach (var spoke in spokeLetters)
+            {
+                for (int i = 0; i < spoke.Count; i++)
+                {
+                    string letter = spoke[i];
+                    var myConns = new List<string>();
+                    if (i > 0)
+                        myConns.Add($"HubAlt-{spoke[i - 1]}-{spoke[i]}");
+                    if (i < spoke.Count - 1)
+                        myConns.Add($"HubAlt-{spoke[i]}-{spoke[i + 1]}");
+                    if (i == spoke.Count - 1)
+                    {
+                        myConns.Add($"Hub-{letter}");
+                        for (int e = 1; e < ConnectionsPerZone; e++)
+                            myConns.Add($"Hub-{letter}-{e}");
+                    }
+
+                    int playerIdx = playerLetters.IndexOf(letter);
+                    if (playerIdx >= 0)
+                    {
+                        zones.Add(BuildSpawnZone(letter, $"Player{playerIdx + 1}", [.. myConns], settings.PlayerZoneCastles, settings.MatchPlayerCastleFactions, settings.PlayerZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
+                    }
+                    else
+                    {
+                        zones.Add(BuildNeutralZone(neutralByLetter[letter], [.. myConns], settings.NeutralZoneSize, settings.SpawnRemoteFootholds, settings.GenerateRoads, tuning));
+                    }
+                }
+            }
+
+            foreach (var spoke in spokeLetters)
+            {
+                for (int i = 0; i < spoke.Count - 1; i++)
+                {
+                    string fromLetter = spoke[i];
+                    string toLetter = spoke[i + 1];
+                    string fromZone = playerLetters.Contains(fromLetter) ? $"Spawn-{fromLetter}" : $"Neutral-{fromLetter}";
+                    string toZone = playerLetters.Contains(toLetter) ? $"Spawn-{toLetter}" : $"Neutral-{toLetter}";
+                    connections.Add(new Connection
+                    {
+                        Name = $"HubAlt-{fromLetter}-{toLetter}",
+                        From = fromZone,
+                        To = toZone,
+                        ConnectionType = "Direct",
+                        GuardZone = fromZone,
+                        GuardEscape = false,
+                        SimTurnSquad = true,
+                        GuardValue = ScaleBorderGuardValue(30000, tuning),
+                        GuardWeeklyIncrement = 0.15,
+                        GuardMatchGroup = $"chain_guard_{fromLetter}_{toLetter}"
+                    });
+                }
+            }
+
+            foreach (var endpointLetter in hubEndpointLetters)
+            {
+                string endpointZone = playerLetters.Contains(endpointLetter) ? $"Spawn-{endpointLetter}" : $"Neutral-{endpointLetter}";
+                connections.Add(new Connection
+                {
+                    Name = $"Hub-{endpointLetter}",
+                    From = "Hub",
+                    To = endpointZone,
+                    ConnectionType = "Direct",
+                    GuardZone = "Hub",
+                    GuardEscape = false,
+                    SimTurnSquad = true,
+                    GuardValue = ScaleBorderGuardValue(30000, tuning),
+                    GuardWeeklyIncrement = 0.15,
+                    GuardMatchGroup = $"hub_guard_{endpointLetter}"
+                });
+
+                for (int e = 1; e < ConnectionsPerZone; e++)
+                {
+                    connections.Add(new Connection
+                    {
+                        Name = $"Hub-{endpointLetter}-{e}",
+                        From = "Hub",
+                        To = endpointZone,
+                        ConnectionType = "Direct",
+                        GuardZone = "Hub",
+                        GuardEscape = false,
+                        SimTurnSquad = true,
+                        GuardValue = ScaleBorderGuardValue(30000, tuning),
+                        GuardWeeklyIncrement = 0.15,
+                        GuardMatchGroup = $"hub_guard_{endpointLetter}_{e}"
+                    });
+                }
+            }
+
+            for (int i = 0; i < ringLetters.Count; i++)
+            {
+                int next = (i + 1) % ringLetters.Count;
+                string fromLetter = ringLetters[i];
+                string toLetter = ringLetters[next];
+                bool fromIsPlayer = playerLetters.Contains(fromLetter);
+                bool toIsPlayer = playerLetters.Contains(toLetter);
+                if (settings.NoDirectPlayerConnections && fromIsPlayer && toIsPlayer)
+                    continue;
+
+                string fromZone = fromIsPlayer ? $"Spawn-{fromLetter}" : $"Neutral-{fromLetter}";
+                string toZone = toIsPlayer ? $"Spawn-{toLetter}" : $"Neutral-{toLetter}";
+                connections.Add(new Connection
+                {
+                    Name = $"Pseudo-{fromLetter}-{toLetter}",
+                    From = fromZone,
+                    To = toZone,
+                    ConnectionType = "Proximity"
+                });
+            }
+
+            if (settings.RandomPortals)
+                connections.AddRange(BuildRandomPortalConnections(playerLetters, ringLetters, tuning, settings.MaxPortalConnections));
+
+            return MakeVariant(playerLetters, ringLetters[0], 1 + playerLetters.Count + neutralZones.Count, zones, connections);
         }
 
         // ── Topology: Chain ───────────────────────────────────────────────────────
